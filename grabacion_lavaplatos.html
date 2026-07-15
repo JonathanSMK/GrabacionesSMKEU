@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Grabación guiada — estudio de detergentes</title>
+<style>
+  :root{
+    --ink:#0f2027;
+    --paper:#eef4f3;
+    --panel:#ffffff;
+    --line:#c9d8d6;
+    --accent:#1f7a6c;
+    --accent-deep:#124d43;
+    --record:#c6432f;
+    --listen:#2f6fb0;
+    --muted:#5c7370;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px;
+  }
+  .app{width:100%; max-width:560px;}
+  .eyebrow{font-size:13px; letter-spacing:.14em; text-transform:uppercase; color:var(--muted); font-weight:600; margin-bottom:6px;}
+  h1{font-size:26px; margin:0 0 20px 0; font-weight:700; letter-spacing:-0.01em;}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:28px; box-shadow:0 1px 2px rgba(15,32,39,.04);}
+  label{display:block; font-size:13px; font-weight:600; color:var(--muted); margin:16px 0 6px 0;}
+  label:first-child{margin-top:0;}
+  input[type=text], select{
+    width:100%; padding:12px 14px; border:1px solid var(--line); border-radius:8px;
+    font-size:15px; background:#fbfdfc; color:var(--ink);
+  }
+  .row{display:flex; gap:14px;}
+  .row > div{flex:1;}
+  .hint{font-size:13px; color:var(--muted); margin-top:10px; line-height:1.5;}
+  button{font-family:inherit; cursor:pointer; border:none;}
+  .btn-start{
+    margin-top:24px; width:100%; background:var(--accent-deep); color:#fff;
+    font-size:18px; font-weight:700; padding:18px; border-radius:12px;
+  }
+  .btn-start:disabled{opacity:.5; cursor:default;}
+
+  .stage{text-align:center; padding:50px 28px;}
+  .orb{
+    width:150px; height:150px; border-radius:50%; margin:10px auto 24px auto;
+    display:flex; align-items:center; justify-content:center;
+    background:var(--line); transition:background .3s ease;
+  }
+  .orb-inner{color:#fff; font-size:16px; font-weight:700; text-transform:uppercase; letter-spacing:.05em;}
+  .state-speaking .orb{background:var(--listen);}
+  .state-recording .orb{background:var(--record);}
+  .state-done .orb{background:var(--accent);}
+  .timer{font-size:34px; font-weight:700; letter-spacing:.02em; margin-bottom:6px;}
+  .statustext{font-size:15px; color:var(--muted); font-weight:600;}
+  .emergency{
+    margin-top:34px; background:none; color:var(--muted); font-size:13px;
+    text-decoration:underline; padding:8px;
+  }
+  .result-card p{font-size:15px; line-height:1.6;}
+  .actions{display:flex; gap:12px; margin-top:20px; flex-wrap:wrap;}
+  .actions button{flex:1; padding:14px; border-radius:10px; font-weight:700; font-size:14px;}
+  .btn-primary{background:var(--accent-deep); color:#fff;}
+  .btn-secondary{background:#fff; color:var(--accent-deep); border:1px solid var(--accent-deep) !important;}
+  .hidden{display:none !important;}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- SETUP -->
+  <div id="setup">
+    <div class="eyebrow" id="txt-eyebrow">Estudio de detergentes</div>
+    <h1 id="txt-title">Grabación de audio guiada</h1>
+    <div class="card">
+      <label id="lbl-lang">Idioma / Language</label>
+      <select id="lang">
+        <option value="es">Español</option>
+        <option value="en">English</option>
+      </select>
+
+      <label id="lbl-pid">Código de participante</label>
+      <input type="text" id="pid" placeholder="Ej. P001">
+
+      <label id="lbl-week">Semana</label>
+      <select id="week">
+        <option value="1">Semana 1 (un solo producto)</option>
+        <option value="2">Semana 2 (incluye comparación)</option>
+      </select>
+
+      <div class="hint" id="hint-setup">Al presionar el botón se pedirá permiso de micrófono. Hazlo con las manos secas y coloca el dispositivo cerca del fregadero, donde puedas escucharlo bien. Después de esto no necesitas tocar nada más: la app te irá guiando con voz y la grabación se detendrá y guardará sola.</div>
+
+      <button class="btn-start" id="btnStart">Iniciar grabación</button>
+    </div>
+  </div>
+
+  <!-- RECORDING -->
+  <div id="stageWrap" class="hidden">
+    <div class="card stage" id="stageCard">
+      <div class="timer" id="timer">00:00</div>
+      <div class="orb"><div class="orb-inner" id="orbLabel">…</div></div>
+      <div class="statustext" id="statusText"></div>
+      <button class="emergency" id="btnEmergency">Terminar y guardar ahora</button>
+    </div>
+  </div>
+
+  <!-- DONE -->
+  <div id="results" class="hidden">
+    <div class="eyebrow" id="txt-eyebrow2">Estudio de detergentes</div>
+    <h1 id="txt-done-title">Grabación guardada</h1>
+    <div class="card result-card">
+      <p id="txt-done-body">Tu grabación se descargó automáticamente en este dispositivo. Gracias por tu participación.</p>
+      <div class="actions">
+        <button class="btn-primary" id="btnDownloadAgain">Descargar de nuevo</button>
+        <button class="btn-secondary" id="btnRestart">Nueva grabación</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  // ---------- Textos de interfaz ----------
+  const UI = {
+    es: {
+      eyebrow: 'Estudio de detergentes', title: 'Grabación de audio guiada',
+      lblLang:'Idioma / Language', lblPid:'Código de participante', lblWeek:'Semana',
+      week1:'Semana 1 (un solo producto)', week2:'Semana 2 (incluye comparación)',
+      hint:'Al presionar el botón se pedirá permiso de micrófono. Hazlo con las manos secas y coloca el dispositivo cerca del fregadero, donde puedas escucharlo bien. Después de esto no necesitas tocar nada más: la app te irá guiando con voz y la grabación se detendrá y guardará sola.',
+      btnStart:'Iniciar grabación',
+      recording:'Grabando', speaking:'Escucha', done:'Listo',
+      statusRecording:'Continúa hablando con naturalidad, la app te irá guiando.',
+      statusSpeaking:'Presta atención a la instrucción…',
+      emergency:'Terminar y guardar ahora',
+      doneTitle:'Grabación guardada',
+      doneBody:'Tu grabación se descargó automáticamente en este dispositivo. Gracias por tu participación.',
+      downloadAgain:'Descargar de nuevo', newRec:'Nueva grabación',
+      needPid:'Por favor escribe tu código de participante antes de iniciar.',
+      micError:'No se pudo acceder al micrófono. Revisa los permisos del navegador e inténtalo de nuevo.'
+    },
+    en: {
+      eyebrow: 'Dish Soap Study', title: 'Guided audio recording',
+      lblLang:'Idioma / Language', lblPid:'Participant code', lblWeek:'Week',
+      week1:'Week 1 (single product)', week2:'Week 2 (includes comparison)',
+      hint:'Pressing the button will ask for microphone permission. Do this with dry hands, and place the device near the sink where you can hear it clearly. After that you won\'t need to touch anything else — the app will guide you with voice prompts, and the recording will stop and save itself.',
+      btnStart:'Start recording',
+      recording:'Recording', speaking:'Listen', done:'Done',
+      statusRecording:'Keep talking naturally — the app will guide you along.',
+      statusSpeaking:'Listen to the prompt…',
+      emergency:'Finish and save now',
+      doneTitle:'Recording saved',
+      doneBody:'Your recording downloaded automatically to this device. Thank you for participating.',
+      downloadAgain:'Download again', newRec:'New recording',
+      needPid:'Please type your participant code before starting.',
+      micError:'Could not access the microphone. Check your browser permissions and try again.'
+    }
+  };
+
+  // ---------- Guiones de voz (paso a paso) ----------
+  // Cada paso: { minMs, maxMs, es, en }
+  function buildScript(week, lang){
+    const steps = [
+      { minMs: 3000, maxMs: 20000,
+        es: 'Antes de comenzar, di en voz alta el código del producto que estás usando hoy. Lo encuentras en la etiqueta del envase.',
+        en: 'Before you begin, say out loud the code of the product you are using today. You can find it on the label of the container.' },
+      { minMs: 15000, maxMs: 100000,
+        es: 'Ahora, antes de abrir la llave del agua, describe con detalle: cuántos platos vas a lavar y de qué tipo; de qué material son; si vas a remojar algo y por qué; qué esponja estás usando; cómo aplicas el jabón, directo en los trastes o en la esponja; y si los estás organizando de alguna manera. Cuando termines de describir esto, comienza a lavar.',
+        en: 'Now, before you turn on the tap, describe in detail: how many dishes you are going to wash and what type; what material they are made of; whether you are soaking anything and why; what sponge you are using; how you apply the soap, directly on the dishes or on the sponge; and whether you are sorting them in any way. When you finish describing this, go ahead and start washing.' },
+      { minMs: 10000, maxMs: 70000,
+        es: 'Mientras empiezas a lavar, cuéntanos sobre la espuma: qué tan rápido aparece, qué cantidad se genera, de qué color es, y cómo son las burbujas, pequeñas y cremosas, o grandes y ligeras.',
+        en: 'As you start washing, tell us about the foam: how quickly it appears, how much is generated, what color it is, and what the bubbles are like, small and creamy, or big and light.' },
+      { minMs: 15000, maxMs: 120000,
+        es: 'Sigue lavando y describe qué tan rápido se quita la grasa o la suciedad y si te cuesta esfuerzo. Cuéntanos cómo se siente la espuma en tus manos, y qué tan fuerte es el olor del producto, si te gusta y si sientes que quita el olor a comida o grasa.',
+        en: 'Keep washing and describe how quickly grease or stuck dirt comes off, and whether it takes much effort. Tell us how the foam feels on your hands, and how strong the scent of the product is, whether you like it, and whether it seems to remove food or grease smells.' },
+      { minMs: 10000, maxMs: 70000,
+        es: 'Cuando empieces a enjuagar, describe qué tan fácil se quita la espuma, cuánta agua sientes que estás usando, y cómo se siente el plato al tacto una vez limpio: resbaloso, o rechina limpio. ¿Cómo sabes que ya quedó limpio?',
+        en: 'When you start rinsing, describe how easily the foam comes off, how much water you feel you are using, and how the dish feels to the touch once clean: slippery, or squeaky clean. How do you know it is clean?' },
+      { minMs: 12000, maxMs: 80000, isFinal: true,
+        es: 'Ya que terminaste de lavar todo, cuéntanos qué te gustó y qué no te gustó de todo el proceso con este producto.',
+        en: 'Now that you have finished washing everything, tell us what you liked and what you did not like about the whole process with this product.' }
+    ];
+    if(week === '2'){
+      steps.push({ minMs: 20000, maxMs: 150000, isFinal:true,
+        es: 'Por último, compara los dos productos que usaste estas dos semanas. ¿Qué te gustó más y qué te gustó menos de cada uno? ¿Cuál tuvo mejor espuma, mejor poder desengrasante, enjuague más fácil y mejor olor? Y si hoy tuvieras que comprar un producto para tu casa, ¿cuál elegirías y por qué?',
+        en: 'Finally, compare the two products you used over these two weeks. What did you like most and least about each one? Which one had better foam, better degreasing power, easier rinsing, and a better scent? And if you had to buy a product for your home today, which one would you choose and why?' });
+      // el paso anterior ya no es el final
+      steps[5].isFinal = false;
+    }
+    return steps.map(s => ({ minMs: s.minMs, maxMs: s.maxMs, isFinal: !!s.isFinal, text: s[lang] }));
+  }
+
+  const CLOSING = {
+    es: 'Muchas gracias, esto termina la grabación de hoy.',
+    en: 'Thank you very much, this is the end of today\'s recording.'
+  };
+
+  // ---------- Elementos ----------
+  const setup = document.getElementById('setup');
+  const stageWrap = document.getElementById('stageWrap');
+  const stageCard = document.getElementById('stageCard');
+  const results = document.getElementById('results');
+  const orbLabel = document.getElementById('orbLabel');
+  const statusText = document.getElementById('statusText');
+  const timerEl = document.getElementById('timer');
+  const btnStart = document.getElementById('btnStart');
+
+  function applyLang(lang){
+    const t = UI[lang];
+    document.getElementById('txt-eyebrow').textContent = t.eyebrow;
+    document.getElementById('txt-eyebrow2').textContent = t.eyebrow;
+    document.getElementById('txt-title').textContent = t.title;
+    document.getElementById('lbl-lang').textContent = t.lblLang;
+    document.getElementById('lbl-pid').textContent = t.lblPid;
+    document.getElementById('lbl-week').textContent = t.lblWeek;
+    document.getElementById('week').options[0].textContent = t.week1;
+    document.getElementById('week').options[1].textContent = t.week2;
+    document.getElementById('hint-setup').textContent = t.hint;
+    btnStart.textContent = t.btnStart;
+    document.getElementById('btnEmergency').textContent = t.emergency;
+    document.getElementById('txt-done-title').textContent = t.doneTitle;
+    document.getElementById('txt-done-body').textContent = t.doneBody;
+    document.getElementById('btnDownloadAgain').textContent = t.downloadAgain;
+    document.getElementById('btnRestart').textContent = t.newRec;
+    document.documentElement.lang = lang;
+  }
+  document.getElementById('lang').addEventListener('change', e => applyLang(e.target.value));
+  applyLang('es');
+
+  // ---------- Estado de grabación ----------
+  let stream, audioCtx, analyser, dataArray;
+  let recorder, chunks = [];
+  let script = [];
+  let stepIdx = 0;
+  let stepStartTime = 0;
+  let sessionStartTime = 0;
+  let silenceStart = null;
+  let rafId = null;
+  let timerInterval = null;
+  let lang = 'es';
+  let pid = '', week = '1';
+  let lastBlob = null;
+  const VOLUME_THRESHOLD = 12;
+  const SILENCE_TO_ADVANCE = 4000;      // silencio para pasar de tema (dentro de min/max)
+  const SILENCE_TO_FINISH = 8000;       // silencio para confirmar que ya terminó el último tema
+  const SESSION_MAX_MS = 25 * 60 * 1000; // tope de seguridad de toda la sesión
+
+  function setOrbState(state){
+    stageCard.className = 'card stage state-' + state;
+  }
+
+  function fmtTime(ms){
+    const s = Math.floor(ms/1000);
+    const mm = String(Math.floor(s/60)).padStart(2,'0');
+    const ss = String(s%60).padStart(2,'0');
+    return mm + ':' + ss;
+  }
+
+  btnStart.addEventListener('click', async () => {
+    lang = document.getElementById('lang').value;
+    pid = document.getElementById('pid').value.trim();
+    week = document.getElementById('week').value;
+    const t = UI[lang];
+    if(!pid){ alert(t.needPid); return; }
+
+    btnStart.disabled = true;
+    try{
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    }catch(e){
+      alert(t.micError);
+      btnStart.disabled = false;
+      return;
+    }
+
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = audioCtx.createMediaStreamSource(stream);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    dataArray = new Uint8Array(analyser.frequencyBinCount);
+    src.connect(analyser);
+
+    script = buildScript(week, lang);
+    stepIdx = 0;
+    chunks = [];
+
+    let mimeType = 'audio/webm';
+    if(!MediaRecorder.isTypeSupported(mimeType)) mimeType = '';
+    recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+    recorder.ondataavailable = e => { if(e.data.size>0) chunks.push(e.data); };
+    recorder.onstop = onRecordingStop;
+    recorder.start();
+
+    sessionStartTime = Date.now();
+    setup.classList.add('hidden');
+    stageWrap.classList.remove('hidden');
+    timerInterval = setInterval(() => {
+      timerEl.textContent = fmtTime(Date.now() - sessionStartTime);
+    }, 500);
+
+    runStep();
+  });
+
+  function speak(text, onEnd){
+    setOrbState('speaking');
+    orbLabel.textContent = UI[lang].speaking;
+    statusText.textContent = UI[lang].statusSpeaking;
+    const utter = new SpeechSynthesisUtterance(text);
+    utter.lang = lang === 'es' ? 'es-MX' : 'en-US';
+    utter.rate = 0.98;
+    utter.onend = onEnd;
+    utter.onerror = onEnd;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utter);
+  }
+
+  function runStep(){
+    if(stepIdx >= script.length){
+      speak(CLOSING[lang], () => {
+        if(recorder && recorder.state === 'recording') recorder.stop();
+      });
+      return;
+    }
+    const step = script[stepIdx];
+    speak(step.text, () => {
+      stepStartTime = Date.now();
+      silenceStart = null;
+      setOrbState('recording');
+      orbLabel.textContent = UI[lang].recording;
+      statusText.textContent = UI[lang].statusRecording;
+      monitor();
+    });
+  }
+
+  function monitor(){
+    analyser.getByteFrequencyData(dataArray);
+    let sum = 0;
+    for(let i=0;i<dataArray.length;i++) sum += dataArray[i];
+    const avg = sum / dataArray.length;
+
+    const now = Date.now();
+    const step = script[stepIdx];
+    const elapsedStep = now - stepStartTime;
+    const elapsedSession = now - sessionStartTime;
+
+    if(avg > VOLUME_THRESHOLD){
+      silenceStart = null;
+    } else if(silenceStart === null){
+      silenceStart = now;
+    }
+    const silentFor = silenceStart ? (now - silenceStart) : 0;
+    const requiredSilence = step.isFinal ? SILENCE_TO_FINISH : SILENCE_TO_ADVANCE;
+
+    const advanceBySilence = elapsedStep > step.minMs && silentFor > requiredSilence;
+    const advanceByMax = elapsedStep > step.maxMs;
+    const forceEndSession = elapsedSession > SESSION_MAX_MS;
+
+    if(forceEndSession){
+      if(recorder && recorder.state === 'recording') recorder.stop();
+      return;
+    }
+    if(advanceBySilence || advanceByMax){
+      stepIdx++;
+      runStep();
+      return;
+    }
+    rafId = requestAnimationFrame(monitor);
+  }
+
+  document.getElementById('btnEmergency').addEventListener('click', () => {
+    if(rafId) cancelAnimationFrame(rafId);
+    window.speechSynthesis.cancel();
+    if(recorder && recorder.state === 'recording') recorder.stop();
+  });
+
+  function onRecordingStop(){
+    if(rafId) cancelAnimationFrame(rafId);
+    if(timerInterval) clearInterval(timerInterval);
+    setOrbState('done');
+    orbLabel.textContent = UI[lang].done;
+    lastBlob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+    if(stream) stream.getTracks().forEach(t => t.stop());
+    triggerDownload(lastBlob);
+    setTimeout(() => {
+      stageWrap.classList.add('hidden');
+      results.classList.remove('hidden');
+    }, 400);
+  }
+
+  function buildFilename(){
+    const now = new Date();
+    const stamp = now.toISOString().replace(/[:.]/g,'-');
+    return `audio_${pid || 'sinID'}_semana${week}_${stamp}.webm`;
+  }
+
+  function triggerDownload(blob){
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = buildFilename();
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+
+  document.getElementById('btnDownloadAgain').addEventListener('click', () => {
+    if(lastBlob) triggerDownload(lastBlob);
+  });
+
+  document.getElementById('btnRestart').addEventListener('click', () => {
+    results.classList.add('hidden');
+    setup.classList.remove('hidden');
+    btnStart.disabled = false;
+    document.getElementById('pid').value = '';
+  });
+
+})();
+</script>
+</body>
+</html>
