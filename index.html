@@ -91,6 +91,10 @@
 
       <div class="hint" id="hint-setup">Al presionar el botón se pedirá permiso de micrófono. Hazlo con las manos secas y coloca el dispositivo cerca del fregadero, donde puedas escucharlo bien. Después de esto no necesitas tocar nada más: la app te irá guiando con voz y la grabación se detendrá y guardará sola.</div>
 
+      <label id="lbl-onedrive">OneDrive</label>
+      <button class="btn-secondary" id="btnConnect" style="width:100%; padding:12px; border-radius:8px; border:1px solid var(--accent-deep) !important;">Conectar con OneDrive</button>
+      <div class="hint" id="onedriveStatus">No conectado todavía. Solo hace falta conectar una vez por dispositivo.</div>
+
       <button class="btn-start" id="btnStart">Iniciar grabación</button>
     </div>
   </div>
@@ -111,6 +115,7 @@
     <h1 id="txt-done-title">Grabación guardada</h1>
     <div class="card result-card">
       <p id="txt-done-body">Tu grabación se descargó automáticamente en este dispositivo. Gracias por tu participación.</p>
+      <p class="hint" id="uploadStatus" style="margin-top:-6px;"></p>
       <div class="actions">
         <button class="btn-primary" id="btnDownloadAgain">Descargar de nuevo</button>
         <button class="btn-secondary" id="btnRestart">Nueva grabación</button>
@@ -120,8 +125,115 @@
 
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3/lib/msal-browser.min.js"></script>
 <script>
 (function(){
+  // ---------- Configuración de OneDrive (Microsoft Graph vía MSAL) ----------
+  const msalConfig = {
+    auth: {
+      clientId: "10581001-bf11-4f6f-b5a2-9ef4341ff4f1",
+      authority: "https://login.microsoftonline.com/820eeaae-7f20-4d9a-852a-fff8bd99e3f8",
+      redirectUri: window.location.origin + window.location.pathname
+    },
+    cache: {
+      cacheLocation: "localStorage",
+      storeAuthStateInCookie: false
+    }
+  };
+  const GRAPH_SCOPES = ["User.Read", "Files.ReadWrite"];
+  const ONEDRIVE_FOLDER = "GrabacionesEstudioDetergentes";
+
+  let msalInstance = null;
+  let activeAccount = null;
+
+  async function initMsal(){
+    try{
+      msalInstance = new msal.PublicClientApplication(msalConfig);
+      await msalInstance.initialize();
+      await msalInstance.handleRedirectPromise().catch(()=>null);
+      const accounts = msalInstance.getAllAccounts();
+      if(accounts.length > 0){
+        activeAccount = accounts[0];
+        msalInstance.setActiveAccount(activeAccount);
+        updateConnectUI(true);
+      } else {
+        updateConnectUI(false);
+      }
+    }catch(e){
+      console.error('Error iniciando MSAL', e);
+    }
+  }
+
+  function updateConnectUI(connected){
+    const t = UI[document.getElementById('lang').value];
+    const statusEl = document.getElementById('onedriveStatus');
+    const btn = document.getElementById('btnConnect');
+    if(connected && activeAccount){
+      statusEl.textContent = t.onedriveConnected + ' ' + (activeAccount.username || '');
+      btn.textContent = t.onedriveReconnect;
+    } else {
+      statusEl.textContent = t.onedriveNotConnected;
+      btn.textContent = t.onedriveConnect;
+    }
+  }
+
+  document.getElementById('btnConnect').addEventListener('click', async () => {
+    try{
+      const result = await msalInstance.loginPopup({ scopes: GRAPH_SCOPES });
+      activeAccount = result.account;
+      msalInstance.setActiveAccount(activeAccount);
+      updateConnectUI(true);
+    }catch(e){
+      alert('No se pudo conectar con OneDrive: ' + e.message);
+    }
+  });
+
+  async function getGraphToken(){
+    if(!activeAccount) throw new Error('No hay sesión activa de OneDrive');
+    try{
+      const res = await msalInstance.acquireTokenSilent({ scopes: GRAPH_SCOPES, account: activeAccount });
+      return res.accessToken;
+    }catch(e){
+      const res = await msalInstance.acquireTokenPopup({ scopes: GRAPH_SCOPES, account: activeAccount });
+      return res.accessToken;
+    }
+  }
+
+  async function uploadToOneDrive(blob, filename){
+    const token = await getGraphToken();
+    const path = `/${ONEDRIVE_FOLDER}/${filename}`;
+    const sessionResp = await fetch(`https://graph.microsoft.com/v1.0/me/drive/root:${path}:/createUploadSession`, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item: { '@microsoft.graph.conflictBehavior': 'rename' } })
+    });
+    if(!sessionResp.ok) throw new Error('No se pudo crear la sesión de subida (' + sessionResp.status + ')');
+    const sessionData = await sessionResp.json();
+    const uploadUrl = sessionData.uploadUrl;
+
+    const chunkSize = 5 * 1024 * 1024; // 5MB, múltiplo de 320KiB
+    const total = blob.size;
+    let start = 0;
+    while(start < total){
+      const end = Math.min(start + chunkSize, total);
+      const chunk = blob.slice(start, end);
+      const resp = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Length': String(end - start),
+          'Content-Range': `bytes ${start}-${end - 1}/${total}`
+        },
+        body: chunk
+      });
+      if(!resp.ok && ![200,201,202].includes(resp.status)){
+        throw new Error('Falló la subida en el fragmento ' + start);
+      }
+      start = end;
+    }
+  }
+
+  window.addEventListener('DOMContentLoaded', initMsal);
+
   // ---------- Textos de interfaz ----------
   const UI = {
     es: {
@@ -138,7 +250,12 @@
       doneBody:'Tu grabación se descargó automáticamente en este dispositivo. Gracias por tu participación.',
       downloadAgain:'Descargar de nuevo', newRec:'Nueva grabación',
       needPid:'Por favor escribe tu código de participante antes de iniciar.',
-      micError:'No se pudo acceder al micrófono. Revisa los permisos del navegador e inténtalo de nuevo.'
+      micError:'No se pudo acceder al micrófono. Revisa los permisos del navegador e inténtalo de nuevo.',
+      onedriveConnect:'Conectar con OneDrive', onedriveReconnect:'Volver a conectar OneDrive',
+      onedriveConnected:'Conectado a OneDrive:', onedriveNotConnected:'No conectado todavía. Solo hace falta conectar una vez por dispositivo.',
+      uploading:'Subiendo la grabación a OneDrive…',
+      uploadOk:'Subida a OneDrive: completada.',
+      uploadFail:'Subida a OneDrive: no se pudo subir, pero el archivo ya se descargó en este dispositivo. Puedes subirlo manualmente después.'
     },
     en: {
       eyebrow: 'Dish Soap Study', title: 'Guided audio recording',
@@ -154,7 +271,12 @@
       doneBody:'Your recording downloaded automatically to this device. Thank you for participating.',
       downloadAgain:'Download again', newRec:'New recording',
       needPid:'Please type your participant code before starting.',
-      micError:'Could not access the microphone. Check your browser permissions and try again.'
+      micError:'Could not access the microphone. Check your browser permissions and try again.',
+      onedriveConnect:'Connect OneDrive', onedriveReconnect:'Reconnect OneDrive',
+      onedriveConnected:'Connected to OneDrive:', onedriveNotConnected:'Not connected yet. You only need to connect once per device.',
+      uploading:'Uploading the recording to OneDrive…',
+      uploadOk:'OneDrive upload: complete.',
+      uploadFail:'OneDrive upload: could not upload, but the file was already downloaded to this device. You can upload it manually later.'
     }
   };
 
@@ -225,7 +347,7 @@
     document.getElementById('btnRestart').textContent = t.newRec;
     document.documentElement.lang = lang;
   }
-  document.getElementById('lang').addEventListener('change', e => applyLang(e.target.value));
+  document.getElementById('lang').addEventListener('change', e => { applyLang(e.target.value); updateConnectUI(!!activeAccount); });
   applyLang('es');
 
   // ---------- Estado de grabación ----------
@@ -373,7 +495,7 @@
     if(recorder && recorder.state === 'recording') recorder.stop();
   });
 
-  function onRecordingStop(){
+  async function onRecordingStop(){
     if(rafId) cancelAnimationFrame(rafId);
     if(timerInterval) clearInterval(timerInterval);
     setOrbState('done');
@@ -381,10 +503,23 @@
     lastBlob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
     if(stream) stream.getTracks().forEach(t => t.stop());
     triggerDownload(lastBlob);
-    setTimeout(() => {
-      stageWrap.classList.add('hidden');
-      results.classList.remove('hidden');
-    }, 400);
+
+    stageWrap.classList.add('hidden');
+    results.classList.remove('hidden');
+    const uploadStatusEl = document.getElementById('uploadStatus');
+
+    if(activeAccount){
+      uploadStatusEl.textContent = UI[lang].uploading;
+      try{
+        await uploadToOneDrive(lastBlob, buildFilename());
+        uploadStatusEl.textContent = UI[lang].uploadOk;
+      }catch(e){
+        console.error('Error subiendo a OneDrive', e);
+        uploadStatusEl.textContent = UI[lang].uploadFail;
+      }
+    } else {
+      uploadStatusEl.textContent = UI[lang].uploadFail;
+    }
   }
 
   function buildFilename(){
