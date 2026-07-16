@@ -91,10 +91,6 @@
 
       <div class="hint" id="hint-setup">Al presionar el botón se pedirá permiso de micrófono. Hazlo con las manos secas y coloca el dispositivo cerca del fregadero, donde puedas escucharlo bien. Después de esto no necesitas tocar nada más: la app te irá guiando con voz y la grabación se detendrá y guardará sola.</div>
 
-      <label id="lbl-onedrive">OneDrive</label>
-      <button class="btn-secondary" id="btnConnect" style="width:100%; padding:12px; border-radius:8px; border:1px solid var(--accent-deep) !important;">Conectar con OneDrive</button>
-      <div class="hint" id="onedriveStatus">No conectado todavía. Solo hace falta conectar una vez por dispositivo.</div>
-
       <button class="btn-start" id="btnStart">Iniciar grabación</button>
     </div>
   </div>
@@ -115,7 +111,6 @@
     <h1 id="txt-done-title">Grabación guardada</h1>
     <div class="card result-card">
       <p id="txt-done-body">Tu grabación se descargó automáticamente en este dispositivo. Gracias por tu participación.</p>
-      <p class="hint" id="uploadStatus" style="margin-top:-6px;"></p>
       <div class="actions">
         <button class="btn-primary" id="btnDownloadAgain">Descargar de nuevo</button>
         <button class="btn-secondary" id="btnRestart">Nueva grabación</button>
@@ -125,122 +120,15 @@
 
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3/lib/msal-browser.min.js"></script>
 <script>
 (function(){
-  // ---------- Configuración de OneDrive (Microsoft Graph vía MSAL) ----------
-  const msalConfig = {
-    auth: {
-      clientId: "10581001-bf11-4f6f-b5a2-9ef4341ff4f1",
-      authority: "https://login.microsoftonline.com/820eeaae-7f20-4d9a-852a-fff8bd99e3f8",
-      redirectUri: window.location.origin + window.location.pathname
-    },
-    cache: {
-      cacheLocation: "localStorage",
-      storeAuthStateInCookie: false
-    }
-  };
-  const GRAPH_SCOPES = ["User.Read", "Files.ReadWrite"];
-  const ONEDRIVE_FOLDER = "GrabacionesEstudioDetergentes";
-
-  let msalInstance = null;
-  let activeAccount = null;
-
-  async function initMsal(){
-    try{
-      msalInstance = new msal.PublicClientApplication(msalConfig);
-      await msalInstance.initialize();
-      await msalInstance.handleRedirectPromise().catch(()=>null);
-      const accounts = msalInstance.getAllAccounts();
-      if(accounts.length > 0){
-        activeAccount = accounts[0];
-        msalInstance.setActiveAccount(activeAccount);
-        updateConnectUI(true);
-      } else {
-        updateConnectUI(false);
-      }
-    }catch(e){
-      console.error('Error iniciando MSAL', e);
-    }
-  }
-
-  function updateConnectUI(connected){
-    const t = UI[document.getElementById('lang').value];
-    const statusEl = document.getElementById('onedriveStatus');
-    const btn = document.getElementById('btnConnect');
-    if(connected && activeAccount){
-      statusEl.textContent = t.onedriveConnected + ' ' + (activeAccount.username || '');
-      btn.textContent = t.onedriveReconnect;
-    } else {
-      statusEl.textContent = t.onedriveNotConnected;
-      btn.textContent = t.onedriveConnect;
-    }
-  }
-
-  document.getElementById('btnConnect').addEventListener('click', async () => {
-    try{
-      const result = await msalInstance.loginPopup({ scopes: GRAPH_SCOPES });
-      activeAccount = result.account;
-      msalInstance.setActiveAccount(activeAccount);
-      updateConnectUI(true);
-    }catch(e){
-      alert('No se pudo conectar con OneDrive: ' + e.message);
-    }
-  });
-
-  async function getGraphToken(){
-    if(!activeAccount) throw new Error('No hay sesión activa de OneDrive');
-    try{
-      const res = await msalInstance.acquireTokenSilent({ scopes: GRAPH_SCOPES, account: activeAccount });
-      return res.accessToken;
-    }catch(e){
-      const res = await msalInstance.acquireTokenPopup({ scopes: GRAPH_SCOPES, account: activeAccount });
-      return res.accessToken;
-    }
-  }
-
-  async function uploadToOneDrive(blob, filename){
-    const token = await getGraphToken();
-    const path = `/${ONEDRIVE_FOLDER}/${filename}`;
-    const sessionResp = await fetch(`https://graph.microsoft.com/v1.0/me/drive/root:${path}:/createUploadSession`, {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ item: { '@microsoft.graph.conflictBehavior': 'rename' } })
-    });
-    if(!sessionResp.ok) throw new Error('No se pudo crear la sesión de subida (' + sessionResp.status + ')');
-    const sessionData = await sessionResp.json();
-    const uploadUrl = sessionData.uploadUrl;
-
-    const chunkSize = 5 * 1024 * 1024; // 5MB, múltiplo de 320KiB
-    const total = blob.size;
-    let start = 0;
-    while(start < total){
-      const end = Math.min(start + chunkSize, total);
-      const chunk = blob.slice(start, end);
-      const resp = await fetch(uploadUrl, {
-        method: 'PUT',
-        headers: {
-          'Content-Length': String(end - start),
-          'Content-Range': `bytes ${start}-${end - 1}/${total}`
-        },
-        body: chunk
-      });
-      if(!resp.ok && ![200,201,202].includes(resp.status)){
-        throw new Error('Falló la subida en el fragmento ' + start);
-      }
-      start = end;
-    }
-  }
-
-  window.addEventListener('DOMContentLoaded', initMsal);
-
   // ---------- Textos de interfaz ----------
   const UI = {
     es: {
       eyebrow: 'Estudio de detergentes', title: 'Grabación de audio guiada',
       lblLang:'Idioma / Language', lblPid:'Código de participante', lblWeek:'Semana',
       week1:'Semana 1 (un solo producto)', week2:'Semana 2 (incluye comparación)',
-      hint:'Al presionar el botón se pedirá permiso de micrófono. Hazlo con las manos secas y coloca el dispositivo cerca del fregadero, donde puedas escucharlo bien. Después de esto no necesitas tocar nada más: la app te irá guiando con voz y la grabación se detendrá y guardará sola.',
+      hint:'Al presionar el botón se pedirá permiso de micrófono. Hazlo con las manos secas y coloca el dispositivo cerca del fregadero, donde puedas escucharlo bien. Después de esto no necesitas tocar nada más: la app te irá guiando con voz y la grabación se detendrá y guardará sola. Importante: sube el volumen del dispositivo y no uses audífonos — así la grabación captura también las instrucciones, no solo tu voz.',
       btnStart:'Iniciar grabación',
       recording:'Grabando', speaking:'Escucha', done:'Listo',
       statusRecording:'Continúa hablando con naturalidad, la app te irá guiando.',
@@ -250,18 +138,13 @@
       doneBody:'Tu grabación se descargó automáticamente en este dispositivo. Gracias por tu participación.',
       downloadAgain:'Descargar de nuevo', newRec:'Nueva grabación',
       needPid:'Por favor escribe tu código de participante antes de iniciar.',
-      micError:'No se pudo acceder al micrófono. Revisa los permisos del navegador e inténtalo de nuevo.',
-      onedriveConnect:'Conectar con OneDrive', onedriveReconnect:'Volver a conectar OneDrive',
-      onedriveConnected:'Conectado a OneDrive:', onedriveNotConnected:'No conectado todavía. Solo hace falta conectar una vez por dispositivo.',
-      uploading:'Subiendo la grabación a OneDrive…',
-      uploadOk:'Subida a OneDrive: completada.',
-      uploadFail:'Subida a OneDrive: no se pudo subir, pero el archivo ya se descargó en este dispositivo. Puedes subirlo manualmente después.'
+      micError:'No se pudo acceder al micrófono. Revisa los permisos del navegador e inténtalo de nuevo.'
     },
     en: {
       eyebrow: 'Dish Soap Study', title: 'Guided audio recording',
       lblLang:'Idioma / Language', lblPid:'Participant code', lblWeek:'Week',
       week1:'Week 1 (single product)', week2:'Week 2 (includes comparison)',
-      hint:'Pressing the button will ask for microphone permission. Do this with dry hands, and place the device near the sink where you can hear it clearly. After that you won\'t need to touch anything else — the app will guide you with voice prompts, and the recording will stop and save itself.',
+      hint:'Pressing the button will ask for microphone permission. Do this with dry hands, and place the device near the sink where you can hear it clearly. After that you won\'t need to touch anything else — the app will guide you with voice prompts, and the recording will stop and save itself. Important: turn up the device volume and do not use headphones — that way the recording also captures the instructions, not just your voice.',
       btnStart:'Start recording',
       recording:'Recording', speaking:'Listen', done:'Done',
       statusRecording:'Keep talking naturally — the app will guide you along.',
@@ -271,12 +154,7 @@
       doneBody:'Your recording downloaded automatically to this device. Thank you for participating.',
       downloadAgain:'Download again', newRec:'New recording',
       needPid:'Please type your participant code before starting.',
-      micError:'Could not access the microphone. Check your browser permissions and try again.',
-      onedriveConnect:'Connect OneDrive', onedriveReconnect:'Reconnect OneDrive',
-      onedriveConnected:'Connected to OneDrive:', onedriveNotConnected:'Not connected yet. You only need to connect once per device.',
-      uploading:'Uploading the recording to OneDrive…',
-      uploadOk:'OneDrive upload: complete.',
-      uploadFail:'OneDrive upload: could not upload, but the file was already downloaded to this device. You can upload it manually later.'
+      micError:'Could not access the microphone. Check your browser permissions and try again.'
     }
   };
 
@@ -347,7 +225,7 @@
     document.getElementById('btnRestart').textContent = t.newRec;
     document.documentElement.lang = lang;
   }
-  document.getElementById('lang').addEventListener('change', e => { applyLang(e.target.value); updateConnectUI(!!activeAccount); });
+  document.getElementById('lang').addEventListener('change', e => applyLang(e.target.value));
   applyLang('es');
 
   // ---------- Estado de grabación ----------
@@ -367,6 +245,70 @@
   const SILENCE_TO_ADVANCE = 4000;      // silencio para pasar de tema (dentro de min/max)
   const SILENCE_TO_FINISH = 8000;       // silencio para confirmar que ya terminó el último tema
   const SESSION_MAX_MS = 25 * 60 * 1000; // tope de seguridad de toda la sesión
+
+  // ---------- Avance por palabra clave ("siguiente", "next"...) ----------
+  const TRIGGER_WORDS = {
+    es: ['siguiente pregunta', 'siguiente', 'termine mi opinion', 'termine', 'ya termine', 'ya acabe', 'acabe', 'continuar', 'listo'],
+    en: ['next question', 'next', "i'm done", 'im done', 'finished', 'that is it', 'thats it', 'continue', 'done']
+  };
+  let recognition = null;
+  let recognitionActive = false;
+
+  function normalizeText(s){
+    return s.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  }
+
+  function stopRecognition(){
+    recognitionActive = false;
+    if(recognition){
+      recognition.onend = null;
+      recognition.onerror = null;
+      recognition.onresult = null;
+      try{ recognition.stop(); }catch(e){}
+      recognition = null;
+    }
+  }
+
+  function startRecognitionForStep(){
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if(!SR) return; // navegador sin soporte: sigue funcionando por silencio/tiempo, sin esto
+    stopRecognition();
+    recognition = new SR();
+    recognition.lang = lang === 'es' ? 'es-MX' : 'en-US';
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognitionActive = true;
+
+    recognition.onresult = (event) => {
+      let transcript = '';
+      for(let i = event.resultIndex; i < event.results.length; i++){
+        transcript += ' ' + event.results[i][0].transcript;
+      }
+      transcript = normalizeText(transcript);
+      const triggers = TRIGGER_WORDS[lang];
+      if(triggers.some(w => transcript.includes(normalizeText(w)))){
+        tryAdvanceByVoice();
+      }
+    };
+    recognition.onerror = () => { /* se reintenta en onend */ };
+    recognition.onend = () => {
+      if(recognitionActive){
+        try{ recognition.start(); }catch(e){}
+      }
+    };
+    try{ recognition.start(); }catch(e){}
+  }
+
+  function tryAdvanceByVoice(){
+    const step = script[stepIdx];
+    const elapsedStep = Date.now() - stepStartTime;
+    if(elapsedStep > step.minMs){
+      stopRecognition();
+      if(rafId) cancelAnimationFrame(rafId);
+      stepIdx++;
+      runStep();
+    }
+  }
 
   function setOrbState(state){
     stageCard.className = 'card stage state-' + state;
@@ -438,6 +380,7 @@
 
   function runStep(){
     if(stepIdx >= script.length){
+      stopRecognition();
       speak(CLOSING[lang], () => {
         if(recorder && recorder.state === 'recording') recorder.stop();
       });
@@ -450,6 +393,7 @@
       setOrbState('recording');
       orbLabel.textContent = UI[lang].recording;
       statusText.textContent = UI[lang].statusRecording;
+      startRecognitionForStep();
       monitor();
     });
   }
@@ -478,10 +422,12 @@
     const forceEndSession = elapsedSession > SESSION_MAX_MS;
 
     if(forceEndSession){
+      stopRecognition();
       if(recorder && recorder.state === 'recording') recorder.stop();
       return;
     }
     if(advanceBySilence || advanceByMax){
+      stopRecognition();
       stepIdx++;
       runStep();
       return;
@@ -491,11 +437,12 @@
 
   document.getElementById('btnEmergency').addEventListener('click', () => {
     if(rafId) cancelAnimationFrame(rafId);
+    stopRecognition();
     window.speechSynthesis.cancel();
     if(recorder && recorder.state === 'recording') recorder.stop();
   });
 
-  async function onRecordingStop(){
+  function onRecordingStop(){
     if(rafId) cancelAnimationFrame(rafId);
     if(timerInterval) clearInterval(timerInterval);
     setOrbState('done');
@@ -503,23 +450,10 @@
     lastBlob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
     if(stream) stream.getTracks().forEach(t => t.stop());
     triggerDownload(lastBlob);
-
-    stageWrap.classList.add('hidden');
-    results.classList.remove('hidden');
-    const uploadStatusEl = document.getElementById('uploadStatus');
-
-    if(activeAccount){
-      uploadStatusEl.textContent = UI[lang].uploading;
-      try{
-        await uploadToOneDrive(lastBlob, buildFilename());
-        uploadStatusEl.textContent = UI[lang].uploadOk;
-      }catch(e){
-        console.error('Error subiendo a OneDrive', e);
-        uploadStatusEl.textContent = UI[lang].uploadFail;
-      }
-    } else {
-      uploadStatusEl.textContent = UI[lang].uploadFail;
-    }
+    setTimeout(() => {
+      stageWrap.classList.add('hidden');
+      results.classList.remove('hidden');
+    }, 400);
   }
 
   function buildFilename(){
